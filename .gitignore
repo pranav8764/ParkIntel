@@ -41,8 +41,8 @@ __pycache__/
 venv/
 env/
 ENV/
-*.pkl
 *.joblib
+*.zip
 # Exclude model binaries from ignore if you want to track them:
 !model-r2 (2)/models/lgb_hotspot_model.txt
 !model-r2 (2)/models/xgb_hotspot_model.json
