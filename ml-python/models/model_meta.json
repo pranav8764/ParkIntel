@@ -1,41 +1,149 @@
 {
-    "feature_cols": [
-        "zone_lat",
-        "zone_lon",
-        "hour",
-        "day_of_week",
-        "month",
-        "is_weekend",
-        "police_station",
-        "junction_name",
-        "junction_flag",
-        "wrong_parking_count",
-        "no_parking_count",
-        "main_road_count",
-        "double_parking_count",
-        "near_crossing_count",
-        "near_signal_count",
-        "footpath_count",
-        "heavy_vehicle_count",
-        "medium_vehicle_count",
-        "light_vehicle_count",
-        "two_wheel_count",
-        "avg_vio_severity",
-        "max_vio_severity",
-        "avg_veh_weight",
-        "violations_last_1h",
-        "violations_last_3h",
-        "violations_last_24h",
-        "violations_last_7d",
-        "repeat_hotspot_score",
-        "zone_total_violations",
-        "historical_zone_log_total",
-        "avg_confidence"
-    ],
-    "class_names": [
-        "LOW",
-        "MEDIUM",
-        "HIGH"
-    ],
-    "primary_model": "lgb"
+  "feature_cols": [
+    "zone_lat",
+    "zone_lon",
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "junction_flag",
+    "violations_last_1h",
+    "violations_last_3h",
+    "violations_last_24h",
+    "violations_last_7d",
+    "active_hours_last_7d",
+    "repeat_hotspot_score",
+    "zone_total_violations",
+    "historical_zone_log_total",
+    "same_hour_prev_day",
+    "same_hour_prev_week",
+    "prev_wrong_parking_count",
+    "prev_no_parking_count",
+    "prev_main_road_count",
+    "prev_double_parking_count",
+    "prev_near_crossing_count",
+    "prev_near_signal_count",
+    "prev_footpath_count",
+    "prev_heavy_vehicle_count",
+    "prev_medium_vehicle_count",
+    "prev_light_vehicle_count",
+    "prev_two_wheel_count",
+    "prev_avg_vio_severity",
+    "prev_max_vio_severity",
+    "prev_avg_veh_weight",
+    "prev_avg_confidence",
+    "police_station_enc"
+  ],
+  "class_names": [
+    "LOW",
+    "MEDIUM",
+    "HIGH"
+  ],
+  "primary_model": "lgb_high_ranker",
+  "multiclass_comparison_primary": "lgb",
+  "target": {
+    "LOW": "0 next-hour violations",
+    "MEDIUM": "1-5 next-hour violations",
+    "HIGH": ">=6 next-hour violations"
+  },
+  "validation": "chronological 70/15/15 split; early stopping uses validation, not test",
+  "test_metrics": [
+    {
+      "Model": "LightGBM",
+      "Accuracy": 0.8482858728404291,
+      "Macro-F1": 0.3287827038698047,
+      "HIGH-F1": 0.02641971946071088
+    },
+    {
+      "Model": "RandomForest",
+      "Accuracy": 0.7718896904710582,
+      "Macro-F1": 0.30580717853388956,
+      "HIGH-F1": 0.02033253850615454
+    },
+    {
+      "Model": "XGBoost",
+      "Accuracy": 0.8289083245811567,
+      "Macro-F1": 0.32083477637108504,
+      "HIGH-F1": 0.017217909569184356
+    }
+  ],
+  "binary_high_ranker": {
+    "average_precision": 0.030245723888754853,
+    "roc_auc": 0.9533690402689369,
+    "best_threshold": {
+      "threshold": 0.5879793140493322,
+      "precision": 0.08101983002832862,
+      "recall": 0.12554872695346794,
+      "f1": 0.09848484848437172
+    },
+    "topk": [
+      {
+        "scope": "Global",
+        "k": 10,
+        "precision_at_k": 0.1,
+        "recall_at_k": 0.000877963125548727,
+        "lift": 191.43195785777,
+        "found_high": 1,
+        "total_high": 1139
+      },
+      {
+        "scope": "Global",
+        "k": 25,
+        "precision_at_k": 0.08,
+        "recall_at_k": 0.001755926251097454,
+        "lift": 153.145566286216,
+        "found_high": 2,
+        "total_high": 1139
+      },
+      {
+        "scope": "Global",
+        "k": 50,
+        "precision_at_k": 0.1,
+        "recall_at_k": 0.004389815627743635,
+        "lift": 191.43195785777,
+        "found_high": 5,
+        "total_high": 1139
+      },
+      {
+        "scope": "Global",
+        "k": 100,
+        "precision_at_k": 0.06,
+        "recall_at_k": 0.0052677787532923615,
+        "lift": 114.85917471466199,
+        "found_high": 6,
+        "total_high": 1139
+      },
+      {
+        "scope": "Global",
+        "k": 250,
+        "precision_at_k": 0.068,
+        "recall_at_k": 0.014925373134328358,
+        "lift": 130.1737313432836,
+        "found_high": 17,
+        "total_high": 1139
+      },
+      {
+        "scope": "Global",
+        "k": 500,
+        "precision_at_k": 0.08,
+        "recall_at_k": 0.03511852502194908,
+        "lift": 153.145566286216,
+        "found_high": 40,
+        "total_high": 1139
+      },
+      {
+        "scope": "Global",
+        "k": 1000,
+        "precision_at_k": 0.086,
+        "recall_at_k": 0.07550482879719052,
+        "lift": 164.63148375768216,
+        "found_high": 86,
+        "total_high": 1139
+      }
+    ]
+  }
 }
