@@ -172,3 +172,23 @@ The service will automatically:
 - Run schema migrations.
 - Ingest data from CSV files.
 - Bind the server to `:8080`.
+
+---
+
+## 🛠️ Troubleshooting Large ONNX Model HTTP Pushes
+If pushing the large ONNX binary models (~82MB uncompressed) over HTTPS results in connection drops (`HTTP 408` timeouts or `send-pack: unexpected disconnect`), optimize your local Git parameters:
+
+```bash
+# Increase HTTP post buffer to 500MB
+git config http.postBuffer 524288000
+
+# Remove low-speed limits and timeout limits
+git config http.lowSpeedLimit 0
+git config http.lowSpeedTime 999999
+
+# Force HTTP/1.1 to prevent HTTP/2 framing disconnections
+git config http.version HTTP/1.1
+
+# Disable pack compression to prevent CPU bottlenecks during serialization
+git config core.compression 0
+```
