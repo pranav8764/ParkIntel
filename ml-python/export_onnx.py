@@ -94,6 +94,15 @@ with open(rf_out, "wb") as f:
     f.write(rf_onnx.SerializeToString())
 print(f"   Saved → {rf_out}")
 
+# ── Strip ZipMap from models ──
+print("\n── Stripping ZipMap operators...")
+import sys
+sys.path.append(".")
+from remove_zipmap import remove_zipmap
+remove_zipmap(str(lgb_out))
+remove_zipmap(str(xgb_out))
+remove_zipmap(str(rf_out))
+
 # ── Validate all three with ONNX Runtime ──────────────────────────────────────
 print("\n── Validating with ONNX Runtime...")
 

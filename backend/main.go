@@ -1,174 +1,135 @@
 package main
 
 import (
+	"context"
 	"log"
-	"math"
 	"net/http"
-	"strconv"
-	"strings"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
-	"gorm.io/gorm"
+	"github.com/pranav8764/ParkIntel/backend/config"
+	"github.com/pranav8764/ParkIntel/backend/db"
+	"github.com/pranav8764/ParkIntel/backend/handlers"
+	"github.com/pranav8764/ParkIntel/backend/inference"
+	"github.com/pranav8764/ParkIntel/backend/middleware"
 )
 
 func main() {
-	// Load .env file if it exists
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, relying on environment variables")
+	log.Println("Starting ParkIntel Go Inference Service...")
+
+	// 1. Load configuration
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	db := SetupDB()
+	// Set Gin mode
+	gin.SetMode(cfg.GinMode)
 
-	r := gin.Default()
-	r.Use(cors.Default()) // Allow all origins for the hackathon
+	// 2. Connect to PostgreSQL database
+	if cfg.DatabaseURL == "" {
+		log.Fatal("DATABASE_URL environment variable is not set")
+	}
+	err = db.InitDB(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.CloseDB()
 
-	r.GET("/api/hotspots", func(c *gin.Context) {
-		dateStr := c.Query("date") // Format expected: YYYY-MM-DD
-		hourStr := c.Query("hour")
-		policeStation := c.Query("police_station")
+	// Locate schema.sql file
+	schemaPath := "schema.sql"
+	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
+		schemaPath = "backend/schema.sql"
+	}
+	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
+		schemaPath = "../backend/schema.sql"
+	}
 
-		query := db.Model(&ZonePrediction{})
+	// 3. Set up Database Schema
+	err = db.SetupSchema(schemaPath)
+	if err != nil {
+		log.Fatalf("Failed to set up database schema: %v", err)
+	}
 
-		// Example filtering logic
-		if dateStr != "" {
-			// Basic substring match since hourBin is a timestamp
-			query = query.Where("date(hour_bin) = ?", dateStr)
-		}
-		if hourStr != "" {
-			hour, err := strconv.Atoi(hourStr)
-			if err == nil {
-				query = query.Where("hour = ?", hour)
-			}
-		}
-		if policeStation != "" && strings.ToUpper(policeStation) != "ALL" {
-			query = query.Where("UPPER(police_station) = ?", strings.ToUpper(policeStation))
-		}
+	// 4. Initialize ONNX runtime and sessions once at startup (blocking)
+	if cfg.OnnxRuntimeLibPath == "" {
+		log.Fatal("ONNX_RUNTIME_LIB_PATH environment variable is not set")
+	}
+	sessions, err := inference.InitModelSessions(cfg.OnnxRuntimeLibPath, cfg.OnnxModelDir)
+	if err != nil {
+		log.Fatalf("Failed to initialize ONNX sessions: %v", err)
+	}
+	defer sessions.Destroy()
 
-		var results []ZonePrediction
-		query.Find(&results)
+	// Initialize handlers with the ONNX sessions singleton
+	handlers.Init(sessions)
 
-		var hotspots []HotspotResponse
-		for _, r := range results {
-			hotspots = append(hotspots, HotspotResponse{
-				ZoneID:             r.ZoneID,
-				Lat:                r.Latitude,
-				Lng:                r.Longitude,
-				PriorityScore:      r.PriorityScore,
-				PriorityLevel:      r.PriorityLevel,
-				ImpactScore:        r.PriorityScore, // Using priority as impact
-				ExpectedViolations: r.ViolationsLast1H, // Proxy
-			})
-		}
+	// Locate CSV files for ingestion
+	trainCSV := "../ml-python/train.csv"
+	testCSV := "../ml-python/test.csv"
+	predictionsCSV := "../ml-python/predictions.csv"
 
+	if _, err := os.Stat(trainCSV); os.IsNotExist(err) {
+		trainCSV = "ml-python/train.csv"
+		testCSV = "ml-python/test.csv"
+		predictionsCSV = "ml-python/predictions.csv"
+	}
+
+	// 5. Ingest data from CSVs if database tables are empty
+	err = db.IngestData(trainCSV, testCSV, predictionsCSV)
+	if err != nil {
+		log.Printf("Warning: CSV data ingestion skipped or failed: %v", err)
+	}
+
+	// 6. Set up Gin router
+	r := gin.New()
+
+	// Register explicit middleware
+	r.Use(gin.Logger())
+	r.Use(gin.Recovery())
+	r.Use(middleware.CORSMiddleware())
+
+	// Register routes
+	r.GET("/api/hotspots", handlers.GetHotspots)
+	r.GET("/api/enforcement/ranking", handlers.GetRanking)
+	r.GET("/api/zones/:zone_id/insights", handlers.GetZoneInsights)
+	r.POST("/api/simulate", handlers.PostSimulate)
+
+	// Health check endpoint
+	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"hotspots": hotspots,
+			"status": "healthy",
+			"time":   time.Now().Format(time.RFC3339),
 		})
 	})
 
-	r.GET("/api/enforcement/ranking", func(c *gin.Context) {
-		dateStr := c.Query("date")
-		hourStr := c.Query("hour")
+	// 7. Run Server with graceful shutdown support
+	srv := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: r,
+	}
 
-		query := db.Model(&ZonePrediction{})
-
-		if dateStr != "" {
-			query = query.Where("date(hour_bin) = ?", dateStr)
+	go func() {
+		log.Printf("Listening and serving HTTP on :%s\n", cfg.Port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
 		}
-		if hourStr != "" {
-			hour, err := strconv.Atoi(hourStr)
-			if err == nil {
-				query = query.Where("hour = ?", hour)
-			}
-		}
+	}()
 
-		var results []ZonePrediction
-		query.Order("priority_score DESC").Limit(100).Find(&results) // Limit to top 100 for ranking
+	// Wait for interrupt signal to gracefully shutdown the server
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
 
-		var rankings []RankingResponse
-		for i, r := range results {
-			rankings = append(rankings, RankingResponse{
-				Rank:              i + 1,
-				ZoneID:            r.ZoneID,
-				PoliceStation:     r.PoliceStation,
-				JunctionName:      r.JunctionName,
-				PriorityScore:     r.PriorityScore,
-				PriorityLevel:     r.PriorityLevel,
-				RecommendedAction: r.RecommendedAction,
-			})
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
 
-		c.JSON(http.StatusOK, gin.H{
-			"rankings": rankings,
-		})
-	})
-
-	r.GET("/api/zones/:zone_id/insights", func(c *gin.Context) {
-		zoneID := c.Param("zone_id")
-
-		var r ZonePrediction
-		if err := db.Where("zone_id = ?", zoneID).First(&r).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Zone not found"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-			return
-		}
-
-		finalOut := r.ToFinalOutput()
-
-		response := ZoneInsightsResponse{
-			ZoneID:             r.ZoneID,
-			TotalViolations:    r.ViolationsLast7D, // Proxy for total
-			RepeatHotspotScore: r.PriorityScore,    // Proxy
-			TopViolationTypes:  []string{"WRONG PARKING", "NO PARKING"}, // Mock data
-			TopVehicleTypes:    []string{"CAR", "SCOOTER"}, // Mock data
-			ImpactScore:        finalOut.ParkingCongestionImpactScore,
-			Reasons:            finalOut.Reasons,
-		}
-
-		c.JSON(http.StatusOK, response)
-	})
-
-	r.POST("/api/simulate", func(c *gin.Context) {
-		var req SimulateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		var r ZonePrediction
-		if err := db.Where("zone_id = ?", req.ZoneID).First(&r).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Zone not found"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-			return
-		}
-
-		reductionFactor := 1.0 - (req.ViolationReductionPercent / 100.0)
-		simulatedScore := math.Max(0, r.PriorityScore * reductionFactor)
-
-		newLevel := "LOW"
-		if simulatedScore > 85 {
-			newLevel = "CRITICAL"
-		} else if simulatedScore > 70 {
-			newLevel = "HIGH"
-		} else if simulatedScore > 40 {
-			newLevel = "MEDIUM"
-		}
-
-		c.JSON(http.StatusOK, SimulateResponse{
-			CurrentPriorityScore:     r.PriorityScore,
-			SimulatedPriorityScore:   math.Round(simulatedScore*100)/100,
-			PriorityChange:           r.PriorityLevel + " → " + newLevel,
-			EstimatedImpactReduction: math.Round((r.PriorityScore - simulatedScore)*100)/100,
-		})
-	})
-
-	// Run the server
-	r.Run(":8080")
+	log.Println("Server exiting gracefully")
 }
