@@ -16,8 +16,7 @@ Thumbs.db
 *.csv
 *.tsv
 *.xlsx
-# Exclude precomputed predictions from ignore if you want to keep them in git:
-!model-r2 (2)/predictions.csv
+ml-python/data/
 
 # Go Build Artifacts & Binaries
 backend/backend
@@ -37,15 +36,13 @@ __pycache__/
 *$py.class
 .ipynb_checkpoints/
 .pytest_cache/
+.matplotlib-cache/
 .venv/
 venv/
 env/
 ENV/
 *.joblib
 *.zip
-# Exclude model binaries from ignore if you want to track them:
-!model-r2 (2)/models/lgb_hotspot_model.txt
-!model-r2 (2)/models/xgb_hotspot_model.json
 
 # Node/Next.js (For the upcoming Frontend)
 node_modules/

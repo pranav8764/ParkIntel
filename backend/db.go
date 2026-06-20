@@ -112,8 +112,8 @@ func SetupDB() *gorm.DB {
 	db.Model(&ZonePrediction{}).Count(&count)
 	if count == 0 {
 		fmt.Println("Database is empty. Starting CSV ingestion...")
-		// Assuming script is run from backend directory
-		err := IngestCSV(db, "../model-r2 (2)/predictions.csv")
+		// Assuming script is run from backend directory.
+		err := IngestCSV(db, "../ml-python/predictions_fixed.csv")
 		if err != nil {
 			fmt.Println("Error ingesting CSV:", err)
 		}
