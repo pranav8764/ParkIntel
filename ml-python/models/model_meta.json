@@ -1,5 +1,5 @@
 {
-  "best_high_threshold": 0.3500000000000001,
+  "best_high_threshold": 0.3626206645697434,
   "class_names": [
     "LOW",
     "MEDIUM",
@@ -35,6 +35,7 @@
     "avg_confidence",
     "police_station_enc"
   ],
+  "primary_model": "rf",
   "low_thresh": 2,
   "medium_thresh": 8
 }

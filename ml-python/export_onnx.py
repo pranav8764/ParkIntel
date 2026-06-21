@@ -5,6 +5,7 @@ Converts all three trained models to ONNX format for Go inference.
 """
 
 import json
+import pickle
 import joblib
 from pathlib import Path
 
@@ -143,6 +144,11 @@ for name, path in MODELS:
     print(f"   {name:<14} input={input_shape}  labels={label_out.shape}  {proba_str}  ✅")
     print(f"                  sample probabilities: {sample_str}")
 
+# ── Load police station encoder categories ────────────────────────────────────
+with open(MODEL_DIR / "police_station_encoder.pkl", "rb") as f:
+    encoder = pickle.load(f)
+police_station_classes = encoder.categories_[0].tolist()
+
 # ── Write ONNX metadata sidecar ───────────────────────────────────────────────
 onnx_meta = {
     "feature_cols":   FEATURE_COLS,
@@ -161,6 +167,9 @@ onnx_meta = {
         "xgb": "xgb_hotspot_model.onnx",
         "rf":  "rf_baseline.onnx",
     },
+    "police_station_encoder": {
+        "classes": police_station_classes
+    }
 }
 
 onnx_meta_path = OUT_DIR / "onnx_meta.json"

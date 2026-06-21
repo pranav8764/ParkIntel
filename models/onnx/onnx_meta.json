@@ -42,7 +42,7 @@
     "probabilities": "output_probability"
   },
   "opset": 12,
-  "primary_model": "lgb",
+  "primary_model": "rf",
   "models": {
     "lgb": "lgb_hotspot_model.onnx",
     "xgb": "xgb_hotspot_model.onnx",

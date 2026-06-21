@@ -133,39 +133,74 @@ Calculated based on the margin between the top two class probabilities:
 
 ## ⚙️ Setup & Execution
 
-### Prerequisites
-- **Go**: Version 1.22+
-- **Docker**: For running PostgreSQL database
+You can run the backend service either inside a standalone Docker container, as part of the multi-container Docker Compose stack, or locally on your host machine.
+
+### Option 1: Running standalone via Docker
+
+The backend service is containerized using a multi-stage Docker build that downloads the correct C++ ONNX Runtime library (`libonnxruntime.so`) dynamically.
+
+1. **Build the backend image**:
+   From the project root directory, run:
+   ```bash
+   docker build -t parkintel-backend -f backend/Dockerfile ./backend
+   ```
+
+2. **Run the container**:
+   Ensure your PostgreSQL database is running, then start the backend container. You must mount the `models/onnx` folder and the `ml-python` datasets folder into the container for model inference and auto-ingestion to work:
+   ```bash
+   docker run --name parkintel-backend-container \
+     -p 8080:8080 \
+     -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/parkintel?sslmode=disable \
+     -e ONNX_MODEL_DIR=/app/models/onnx \
+     -e ONNX_RUNTIME_LIB_PATH=/usr/lib/libonnxruntime.so \
+     -v $(pwd)/models/onnx:/app/models/onnx \
+     -v $(pwd)/ml-python:/app/ml-python \
+     -d parkintel-backend
+   ```
+   *(Note: Use `host.docker.internal` on macOS/Windows, or your host IP address on Linux, to refer to a PostgreSQL instance running locally on your host machine.)*
+
+### Option 2: Running via Docker Compose (Recommended)
+
+From the project root directory, simply boot the entire stack (Database, Backend, and Frontend):
+```bash
+docker compose up --build -d
+```
+The Docker Compose setup mounts all necessary folders and variables automatically. Refer to the root [README.md](file:///home/gagan-ahlawat/Documents/ParkIntel/README.md) for details.
+
+### Option 3: Traditional Local Execution
+
+#### Prerequisites
+- **Go**: Version 1.25+
+- **PostgreSQL**: Running instance on port `5432`
 - **ONNX Runtime Shared Library**: The Go library uses CGO to link against `libonnxruntime.so`. The script defaults to finding it in the Python virtual environment at `./ml-python/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.27.0`.
 
-### 1. Run PostgreSQL Database
-Start a local PostgreSQL database using Docker:
-```bash
-docker run --name parkintel-postgres -e POSTGRES_DB=parkintel -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:16-alpine
-```
+1. **Run PostgreSQL Database**:
+   ```bash
+   docker run --name parkintel-postgres -e POSTGRES_DB=parkintel -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:16-alpine
+   ```
 
-### 2. Configure Environment Variables
-Create a `.env` file in the `backend/` directory:
-```env
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/parkintel?sslmode=disable
-ONNX_MODEL_DIR=../models/onnx
-PORT=8080
-GIN_MODE=release
-ONNX_RUNTIME_LIB_PATH=../ml-python/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.27.0
-```
+2. **Configure Environment Variables**:
+   Create a `.env` file in the `backend/` directory:
+   ```env
+   DATABASE_URL=postgres://postgres:postgres@localhost:5432/parkintel?sslmode=disable
+   ONNX_MODEL_DIR=../models/onnx
+   PORT=8080
+   GIN_MODE=release
+   ONNX_RUNTIME_LIB_PATH=../ml-python/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.27.0
+   ```
 
-### 3. Build & Run
-Run the Go service from the `backend/` directory:
-```bash
-# Fetch and tidy packages
-go mod tidy
+3. **Build & Run**:
+   Run the Go service from the `backend/` directory:
+   ```bash
+   # Fetch and tidy packages
+   go mod tidy
 
-# Run tests
-go test -v ./...
+   # Run tests
+   go test -v ./...
 
-# Start service
-go run main.go
-```
+   # Start service
+   go run main.go
+   ```
 
 The service will automatically:
 - Load the ONNX models.

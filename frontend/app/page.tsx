@@ -6,8 +6,13 @@
 // ============================================================================
 
 import { CommandShell } from "@/components/command-center/command-shell";
-import { CommandMap } from "@/components/command-center/command-map";
 import { TelemetryPanel } from "@/components/command-center/telemetry-panel";
+import dynamic from "next/dynamic";
+
+const CommandMap = dynamic(
+  () => import("@/components/command-center/command-map").then((mod) => mod.CommandMap),
+  { ssr: false }
+);
 import { RankingPanel } from "@/components/command-center/ranking-panel";
 import { ZoneInsightsPanel } from "@/components/command-center/zone-insights-panel";
 import { SimulationPanel } from "@/components/command-center/simulation-panel";

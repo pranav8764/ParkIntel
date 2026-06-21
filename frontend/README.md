@@ -167,33 +167,63 @@ Modify the variables as necessary:
 
 ---
 
-## 🚀 Getting Started & Local Setup
+## 🚀 Getting Started & Setup
 
-### Prerequisites
+You can run the frontend either inside a standalone Docker container, as part of the multi-container Docker Compose stack, or locally on your host machine.
+
+### Option 1: Running standalone via Docker
+
+The frontend application can be built and run using Node.js Alpine base image:
+
+1. **Build the frontend image**:
+   From the project root directory, run:
+   ```bash
+   docker build -t parkintel-frontend -f frontend/Dockerfile ./frontend
+   ```
+
+2. **Run the container**:
+   ```bash
+   docker run --name parkintel-frontend-container \
+     -p 3000:3000 \
+     -e NEXT_PUBLIC_API_BASE_URL=http://localhost:8080 \
+     -d parkintel-frontend
+   ```
+   Now access the frontend at [http://localhost:3000](http://localhost:3000) on your host machine.
+
+### Option 2: Running via Docker Compose (Recommended)
+
+From the project root directory, simply run:
+```bash
+docker compose up --build -d
+```
+Refer to the root [README.md](file:///home/gagan-ahlawat/Documents/ParkIntel/README.md) for more details.
+
+### Option 3: Local Host Running
+
+#### Prerequisites
 * **Node.js**: Version 18+ or 20+
-* **Package Manager**: npm (installed with Node)
+* **Package Manager**: npm
 
-### 1. Install Dependencies
-Navigate to the `frontend/` directory and install the packages:
-```bash
-npm install
-```
+1. **Install Dependencies**:
+   Navigate to the `frontend/` directory and run:
+   ```bash
+   npm install
+   ```
 
-### 2. Run the Development Server
-```bash
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000) in your web browser.
+2. **Run the Development Server**:
+   ```bash
+   npm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) in your web browser.
 
-### 3. Production Build & Validation
-To build a static production bundle and check for compilation errors:
-```bash
-# Run lint checks
-npm run lint
+3. **Production Build & Validation**:
+   ```bash
+   # Run lint checks
+   npm run lint
 
-# Build the Next.js bundle
-npm run build
-```
+   # Build the Next.js bundle
+   npm run build
+   ```
 
 ---
 

@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: parkintel-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: parkintel
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d parkintel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: parkintel-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/parkintel?sslmode=disable
+      ONNX_MODEL_DIR: /app/models/onnx
+      ONNX_RUNTIME_LIB_PATH: /usr/lib/libonnxruntime.so
+      PORT: 8080
+      GIN_MODE: release
+    volumes:
+      - ./models/onnx:/app/models/onnx
+      - ./ml-python:/app/ml-python
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: parkintel-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+
+volumes:
+  postgres_data:
