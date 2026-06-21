@@ -26,9 +26,8 @@
   --color-muted: #6b7280;
 
   /* --- Typography --- */
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, "Cascadia Code",
-    "Source Code Pro", monospace;
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
 }
 
 /* ---------------------------------------------------------------------------
