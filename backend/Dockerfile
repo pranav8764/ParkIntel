@@ -46,6 +46,7 @@ RUN set -eux; \
     rm -rf onnxruntime.tgz "${ort_dir}"
 
 ENV ONNX_RUNTIME_LIB_PATH=/usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}
+ENV ONNX_MODEL_DIR=/app/models/onnx
 ENV LD_LIBRARY_PATH=/usr/lib
 
 # Copy the compiled binary from the build stage
@@ -53,6 +54,10 @@ COPY --from=builder /app/parkintel-backend .
 
 # Copy the database schema file (it is needed by the backend)
 COPY --from=builder /app/schema.sql .
+
+# Copy ONNX model artifacts into the production image. Railway does not have
+# Docker Compose bind mounts, so the models must be baked into the image.
+COPY models/onnx ./models/onnx
 
 # Expose backend port
 EXPOSE 8080
