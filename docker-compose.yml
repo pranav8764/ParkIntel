@@ -16,7 +16,7 @@ services:
       PORT: 8080
       GIN_MODE: release
     volumes:
-      - ./models/onnx:/app/models/onnx
+      - ./backend/models/onnx:/app/models/onnx
       - ./ml-python:/app/ml-python
 
   frontend:

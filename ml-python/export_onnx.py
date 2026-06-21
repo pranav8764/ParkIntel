@@ -20,7 +20,12 @@ from skl2onnx.common.data_types import FloatTensorType as SklFloatType
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 MODEL_DIR = Path("models")
-OUT_DIR   = Path("models/onnx")
+if not MODEL_DIR.exists():
+    MODEL_DIR = Path("../models")
+
+OUT_DIR = Path("backend/models/onnx")
+if not Path("backend").exists():
+    OUT_DIR = Path("../backend/models/onnx")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Load metadata ─────────────────────────────────────────────────────────────
