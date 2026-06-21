@@ -152,7 +152,7 @@ The backend service is containerized using a multi-stage Docker build that downl
      -p 8080:8080 \
      -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/parkintel?sslmode=disable \
      -e ONNX_MODEL_DIR=/app/models/onnx \
-     -e ONNX_RUNTIME_LIB_PATH=/usr/lib/libonnxruntime.so \
+     -e ONNX_RUNTIME_LIB_PATH=/usr/lib/libonnxruntime.so.1.27.0 \
      -v $(pwd)/models/onnx:/app/models/onnx \
      -v $(pwd)/ml-python:/app/ml-python \
      -d parkintel-backend
@@ -172,7 +172,7 @@ The Docker Compose setup mounts all necessary folders and variables automaticall
 #### Prerequisites
 - **Go**: Version 1.25+
 - **PostgreSQL**: Running instance on port `5432`
-- **ONNX Runtime Shared Library**: The Go library uses CGO to link against `libonnxruntime.so`. The script defaults to finding it in the Python virtual environment at `./ml-python/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.27.0`.
+- **ONNX Runtime Shared Library**: The Go library uses CGO to load `libonnxruntime.so`. Production containers bake ONNX Runtime into `/usr/lib`; local development can either install the system library or point `ONNX_RUNTIME_LIB_PATH` to the actual library installed by the Python `onnxruntime` package.
 
 1. **Run PostgreSQL Database**:
    ```bash

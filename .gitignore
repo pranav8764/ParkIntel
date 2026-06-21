@@ -21,6 +21,7 @@ ml-python/data/
 # Go Build Artifacts & Binaries
 backend/backend
 backend/main
+backend/.gocache/
 *.exe
 *.exe~
 *.dll
