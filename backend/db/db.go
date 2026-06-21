@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
@@ -68,20 +69,59 @@ func SetupSchema(schemaPath string) error {
 	return nil
 }
 
-// IngestData performs data ingestion if the tables are empty
+// IngestData performs data ingestion if the tables are empty or incomplete
 func IngestData(trainCSVPath, testCSVPath, predictionsCSVPath string) error {
+	ctx := context.Background()
+	conn, err := dbPool.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get database connection: %w", err)
+	}
+	defer conn.Close()
+
+	var locked bool
+	err = conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock(54321)").Scan(&locked)
+	if err != nil {
+		return fmt.Errorf("failed to acquire advisory lock: %w", err)
+	}
+	if !locked {
+		log.Println("Another data ingestion process is already running. Skipping ingestion.")
+		return nil
+	}
+	defer func() {
+		_, _ = conn.ExecContext(ctx, "SELECT pg_advisory_unlock(54321)")
+	}()
+
 	var count int
-	err := dbPool.QueryRow("SELECT COUNT(*) FROM zone_predictions").Scan(&count)
+	err = conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM zone_predictions").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to check zone_predictions count: %w", err)
 	}
 
-	if count > 0 {
-		log.Printf("Database already contains %d records. Skipping ingestion.\n", count)
-		return nil
+	forceIngest := os.Getenv("FORCE_INGEST") == "true"
+	expectedRows := 11280
+
+	if count > 0 && !forceIngest {
+		if count >= expectedRows {
+			log.Printf("Database already contains %d records (expected %d). Skipping ingestion.\n", count, expectedRows)
+			return nil
+		}
+		log.Printf("Database contains incomplete data (%d/%d records). Clearing tables to re-ingest complete data...\n", count, expectedRows)
+		forceIngest = true
 	}
 
-	log.Println("Database is empty. Starting CSV ingestion...")
+	if forceIngest {
+		_, err = conn.ExecContext(ctx, "DELETE FROM zone_predictions")
+		if err != nil {
+			return fmt.Errorf("failed to clear zone_predictions: %w", err)
+		}
+		_, err = conn.ExecContext(ctx, "DELETE FROM zone_time_features")
+		if err != nil {
+			return fmt.Errorf("failed to clear zone_time_features: %w", err)
+		}
+		log.Println("Database tables cleared successfully.")
+	}
+
+	log.Println("Starting CSV ingestion...")
 
 	// 1. Load train.csv to calculate historical baselines: zone_hour_hist_mean and zone_dow_hist_mean
 	log.Println("Step 1/2: Reading train.csv to compute historical means...")
@@ -209,16 +249,6 @@ func ingestSynchronized(testCSVPath, predictionsCSVPath string, hourHist, dowHis
 		predColIdx[name] = i
 	}
 
-	parseFloat := func(s string) float64 {
-		v, _ := strconv.ParseFloat(s, 64)
-		return v
-	}
-
-	parseInt := func(s string) int {
-		v, _ := strconv.Atoi(s)
-		return v
-	}
-
 	// Helper to clean Python string list representation: e.g. ['General violation cluster'] -> ["General violation cluster"]
 	cleanReasons := func(s string) string {
 		s = strings.TrimSpace(s)
@@ -275,157 +305,18 @@ func ingestSynchronized(testCSVPath, predictionsCSVPath string, hourHist, dowHis
 		}
 
 		// 1. Ingest all features in this batch
-		stmtFeatures, err := tx.Prepare(`
-			INSERT INTO zone_time_features (
-				zone_id, hour, day_of_week, police_station, junction_name, junction_flag,
-				total_violations, wrong_parking_count, no_parking_count, main_road_count,
-				double_parking_count, near_crossing_count, near_signal_count, footpath_count,
-				heavy_vehicle_count, medium_vehicle_count, light_vehicle_count, two_wheel_count,
-				avg_vio_severity, max_vio_severity, avg_veh_weight, violations_last_1h,
-				violations_last_3h, violations_last_24h, violations_last_7d, repeat_hotspot_score,
-				historical_zone_log_total, zone_hour_hist_mean, zone_dow_hist_mean, avg_confidence
-			) VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-				$19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
-			) ON CONFLICT (zone_id, hour) DO NOTHING
-		`)
+		err = bulkInsertFeatures(tx, testBatch, testColIdx, hourHist, dowHist)
 		if err != nil {
 			_ = tx.Rollback()
-			return err
+			return fmt.Errorf("failed synchronized CSV ingestion for features: %w", err)
 		}
-
-		for _, testRecord := range testBatch {
-			zoneID := testRecord[testColIdx["zone_id"]]
-			hour := parseInt(testRecord[testColIdx["hour"]])
-			dow := parseInt(testRecord[testColIdx["day_of_week"]])
-
-			hk := histKey{zoneID: zoneID, keyVal: hour}
-			dk := histKey{zoneID: zoneID, keyVal: dow}
-			hourHistMean := hourHist[hk]
-			dowHistMean := dowHist[dk]
-
-			_, err = stmtFeatures.Exec(
-				zoneID,
-				hour,
-				dow,
-				testRecord[testColIdx["police_station"]],
-				testRecord[testColIdx["junction_name"]],
-				parseInt(testRecord[testColIdx["junction_flag"]]),
-				parseFloat(testRecord[testColIdx["total_violations"]]),
-				parseFloat(testRecord[testColIdx["wrong_parking_count"]]),
-				parseFloat(testRecord[testColIdx["no_parking_count"]]),
-				parseFloat(testRecord[testColIdx["main_road_count"]]),
-				parseFloat(testRecord[testColIdx["double_parking_count"]]),
-				parseFloat(testRecord[testColIdx["near_crossing_count"]]),
-				parseFloat(testRecord[testColIdx["near_signal_count"]]),
-				parseFloat(testRecord[testColIdx["footpath_count"]]),
-				parseFloat(testRecord[testColIdx["heavy_vehicle_count"]]),
-				parseFloat(testRecord[testColIdx["medium_vehicle_count"]]),
-				parseFloat(testRecord[testColIdx["light_vehicle_count"]]),
-				parseFloat(testRecord[testColIdx["two_wheel_count"]]),
-				parseFloat(testRecord[testColIdx["avg_vio_severity"]]),
-				parseFloat(testRecord[testColIdx["max_vio_severity"]]),
-				parseFloat(testRecord[testColIdx["avg_veh_weight"]]),
-				parseFloat(testRecord[testColIdx["violations_last_1h"]]),
-				parseFloat(testRecord[testColIdx["violations_last_3h"]]),
-				parseFloat(testRecord[testColIdx["violations_last_24h"]]),
-				parseFloat(testRecord[testColIdx["violations_last_7d"]]),
-				parseFloat(testRecord[testColIdx["repeat_hotspot_score"]]),
-				parseFloat(testRecord[testColIdx["historical_zone_log_total"]]),
-				hourHistMean,
-				dowHistMean,
-				parseFloat(testRecord[testColIdx["avg_confidence"]]),
-			)
-			if err != nil {
-				_ = stmtFeatures.Close()
-				_ = tx.Rollback()
-				return fmt.Errorf("failed to insert time feature: %w", err)
-			}
-		}
-		_ = stmtFeatures.Close()
 
 		// 2. Ingest all predictions in this batch
-		stmtPredictions, err := tx.Prepare(`
-			INSERT INTO zone_predictions (
-				zone_id, zone_lat, zone_lon, police_station, junction_name,
-				prediction_time, hour, day_of_week, month, predicted_hotspot_risk,
-				model_confidence, high_prob, prob_low, prob_medium, impact_score,
-				priority_score, priority_level, recommended_action, reasons_json
-			) VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
-			)
-		`)
+		err = bulkInsertPredictions(tx, predBatch, predColIdx, cleanReasons)
 		if err != nil {
 			_ = tx.Rollback()
-			return err
+			return fmt.Errorf("failed synchronized CSV ingestion for predictions: %w", err)
 		}
-
-		for _, predRecord := range predBatch {
-			zoneID := predRecord[predColIdx["zone_id"]]
-			lat := parseFloat(predRecord[predColIdx["zone_lat"]])
-			lon := parseFloat(predRecord[predColIdx["zone_lon"]])
-			station := predRecord[predColIdx["police_station"]]
-			jName := predRecord[predColIdx["junction_name"]]
-			hour := parseInt(predRecord[predColIdx["hour"]])
-			dow := parseInt(predRecord[predColIdx["day_of_week"]])
-			month := parseInt(predRecord[predColIdx["month"]])
-
-			predictionTimeStr := predRecord[predColIdx["hour_bin"]]
-			predictionTime, err := time.Parse("2006-01-02 15:04:05-07:00", predictionTimeStr)
-			if err != nil {
-				predictionTime, _ = time.Parse(time.RFC3339, predictionTimeStr)
-			}
-
-			risk := predRecord[predColIdx["hotspot_risk"]]
-			highProb := parseFloat(predRecord[predColIdx["high_prob"]])
-			priorityScore := parseFloat(predRecord[predColIdx["priority_score"]])
-			priorityLevel := predRecord[predColIdx["priority_level"]]
-			recAction := predRecord[predColIdx["recommended_action"]]
-			reasons := cleanReasons(predRecord[predColIdx["reasons"]])
-
-			confidence := "MEDIUM"
-			if highProb > 0.45 {
-				confidence = "HIGH"
-			} else if highProb < 0.15 {
-				confidence = "LOW"
-			}
-
-			impactScore := math.Round(((priorityScore - 0.25*highProb*100)/0.75)*100) / 100
-			if impactScore < 0 {
-				impactScore = priorityScore
-			}
-			if impactScore > 100 {
-				impactScore = 100
-			}
-
-			_, err = stmtPredictions.Exec(
-				zoneID,
-				lat,
-				lon,
-				station,
-				jName,
-				predictionTime,
-				hour,
-				dow,
-				month,
-				risk,
-				confidence,
-				highProb,
-				1.0-highProb,
-				0.0,
-				impactScore,
-				priorityScore,
-				priorityLevel,
-				recAction,
-				reasons,
-			)
-			if err != nil {
-				_ = stmtPredictions.Close()
-				_ = tx.Rollback()
-				return fmt.Errorf("failed to insert prediction: %w", err)
-			}
-		}
-		_ = stmtPredictions.Close()
 
 		err = tx.Commit()
 		if err != nil {
@@ -442,4 +333,204 @@ func ingestSynchronized(testCSVPath, predictionsCSVPath string, hourHist, dowHis
 
 	log.Printf("Successfully ingested %d synchronized rows into both tables.\n", count)
 	return nil
+}
+
+func bulkInsertFeatures(tx *sql.Tx, batch [][]string, testColIdx map[string]int, hourHist, dowHist map[histKey]float64) error {
+	if len(batch) == 0 {
+		return nil
+	}
+
+	numCols := 30
+	queryBuilder := strings.Builder{}
+	queryBuilder.WriteString(`
+		INSERT INTO zone_time_features (
+			zone_id, hour, day_of_week, police_station, junction_name, junction_flag,
+			total_violations, wrong_parking_count, no_parking_count, main_road_count,
+			double_parking_count, near_crossing_count, near_signal_count, footpath_count,
+			heavy_vehicle_count, medium_vehicle_count, light_vehicle_count, two_wheel_count,
+			avg_vio_severity, max_vio_severity, avg_veh_weight, violations_last_1h,
+			violations_last_3h, violations_last_24h, violations_last_7d, repeat_hotspot_score,
+			historical_zone_log_total, zone_hour_hist_mean, zone_dow_hist_mean, avg_confidence
+		) VALUES `)
+
+	args := make([]interface{}, 0, len(batch)*numCols)
+	placeholderIdx := 1
+
+	parseFloat := func(s string) float64 {
+		v, _ := strconv.ParseFloat(s, 64)
+		return v
+	}
+
+	parseInt := func(s string) int {
+		v, _ := strconv.Atoi(s)
+		return v
+	}
+
+	for i, record := range batch {
+		if i > 0 {
+			queryBuilder.WriteString(", ")
+		}
+		queryBuilder.WriteString("(")
+		for j := 0; j < numCols; j++ {
+			if j > 0 {
+				queryBuilder.WriteString(", ")
+			}
+			queryBuilder.WriteString(fmt.Sprintf("$%d", placeholderIdx))
+			placeholderIdx++
+		}
+		queryBuilder.WriteString(")")
+
+		zoneID := record[testColIdx["zone_id"]]
+		hour := parseInt(record[testColIdx["hour"]])
+		dow := parseInt(record[testColIdx["day_of_week"]])
+
+		hk := histKey{zoneID: zoneID, keyVal: hour}
+		dk := histKey{zoneID: zoneID, keyVal: dow}
+		hourHistMean := hourHist[hk]
+		dowHistMean := dowHist[dk]
+
+		args = append(args,
+			zoneID,
+			hour,
+			dow,
+			record[testColIdx["police_station"]],
+			record[testColIdx["junction_name"]],
+			parseInt(record[testColIdx["junction_flag"]]),
+			parseFloat(record[testColIdx["total_violations"]]),
+			parseFloat(record[testColIdx["wrong_parking_count"]]),
+			parseFloat(record[testColIdx["no_parking_count"]]),
+			parseFloat(record[testColIdx["main_road_count"]]),
+			parseFloat(record[testColIdx["double_parking_count"]]),
+			parseFloat(record[testColIdx["near_crossing_count"]]),
+			parseFloat(record[testColIdx["near_signal_count"]]),
+			parseFloat(record[testColIdx["footpath_count"]]),
+			parseFloat(record[testColIdx["heavy_vehicle_count"]]),
+			parseFloat(record[testColIdx["medium_vehicle_count"]]),
+			parseFloat(record[testColIdx["light_vehicle_count"]]),
+			parseFloat(record[testColIdx["two_wheel_count"]]),
+			parseFloat(record[testColIdx["avg_vio_severity"]]),
+			parseFloat(record[testColIdx["max_vio_severity"]]),
+			parseFloat(record[testColIdx["avg_veh_weight"]]),
+			parseFloat(record[testColIdx["violations_last_1h"]]),
+			parseFloat(record[testColIdx["violations_last_3h"]]),
+			parseFloat(record[testColIdx["violations_last_24h"]]),
+			parseFloat(record[testColIdx["violations_last_7d"]]),
+			parseFloat(record[testColIdx["repeat_hotspot_score"]]),
+			parseFloat(record[testColIdx["historical_zone_log_total"]]),
+			hourHistMean,
+			dowHistMean,
+			parseFloat(record[testColIdx["avg_confidence"]]),
+		)
+	}
+
+	queryBuilder.WriteString(" ON CONFLICT (zone_id, hour) DO NOTHING")
+
+	_, err := tx.Exec(queryBuilder.String(), args...)
+	return err
+}
+
+func bulkInsertPredictions(tx *sql.Tx, batch [][]string, predColIdx map[string]int, cleanReasons func(string) string) error {
+	if len(batch) == 0 {
+		return nil
+	}
+
+	numCols := 19
+	queryBuilder := strings.Builder{}
+	queryBuilder.WriteString(`
+		INSERT INTO zone_predictions (
+			zone_id, zone_lat, zone_lon, police_station, junction_name,
+			prediction_time, hour, day_of_week, month, predicted_hotspot_risk,
+			model_confidence, high_prob, prob_low, prob_medium, impact_score,
+			priority_score, priority_level, recommended_action, reasons_json
+		) VALUES `)
+
+	args := make([]interface{}, 0, len(batch)*numCols)
+	placeholderIdx := 1
+
+	parseFloat := func(s string) float64 {
+		v, _ := strconv.ParseFloat(s, 64)
+		return v
+	}
+
+	parseInt := func(s string) int {
+		v, _ := strconv.Atoi(s)
+		return v
+	}
+
+	for i, record := range batch {
+		if i > 0 {
+			queryBuilder.WriteString(", ")
+		}
+		queryBuilder.WriteString("(")
+		for j := 0; j < numCols; j++ {
+			if j > 0 {
+				queryBuilder.WriteString(", ")
+			}
+			queryBuilder.WriteString(fmt.Sprintf("$%d", placeholderIdx))
+			placeholderIdx++
+		}
+		queryBuilder.WriteString(")")
+
+		zoneID := record[predColIdx["zone_id"]]
+		lat := parseFloat(record[predColIdx["zone_lat"]])
+		lon := parseFloat(record[predColIdx["zone_lon"]])
+		station := record[predColIdx["police_station"]]
+		jName := record[predColIdx["junction_name"]]
+		hour := parseInt(record[predColIdx["hour"]])
+		dow := parseInt(record[predColIdx["day_of_week"]])
+		month := parseInt(record[predColIdx["month"]])
+
+		predictionTimeStr := record[predColIdx["hour_bin"]]
+		predictionTime, err := time.Parse("2006-01-02 15:04:05-07:00", predictionTimeStr)
+		if err != nil {
+			predictionTime, _ = time.Parse(time.RFC3339, predictionTimeStr)
+		}
+
+		risk := record[predColIdx["hotspot_risk"]]
+		highProb := parseFloat(record[predColIdx["high_prob"]])
+		priorityScore := parseFloat(record[predColIdx["priority_score"]])
+		priorityLevel := record[predColIdx["priority_level"]]
+		recAction := record[predColIdx["recommended_action"]]
+		reasons := cleanReasons(record[predColIdx["reasons"]])
+
+		confidence := "MEDIUM"
+		if highProb > 0.45 {
+			confidence = "HIGH"
+		} else if highProb < 0.15 {
+			confidence = "LOW"
+		}
+
+		impactScore := math.Round(((priorityScore - 0.25*highProb*100)/0.75)*100) / 100
+		if impactScore < 0 {
+			impactScore = priorityScore
+		}
+		if impactScore > 100 {
+			impactScore = 100
+		}
+
+		args = append(args,
+			zoneID,
+			lat,
+			lon,
+			station,
+			jName,
+			predictionTime,
+			hour,
+			dow,
+			month,
+			risk,
+			confidence,
+			highProb,
+			1.0-highProb,
+			0.0,
+			impactScore,
+			priorityScore,
+			priorityLevel,
+			recAction,
+			reasons,
+		)
+	}
+
+	_, err := tx.Exec(queryBuilder.String(), args...)
+	return err
 }
