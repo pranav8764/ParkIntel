@@ -55,7 +55,7 @@ docker compose up --build -d
 
 This single command will:
 1. Initialize a PostgreSQL 16 database container.
-2. Build the Go API container, download the prebuilt ONNX Runtime C library (`libonnxruntime.so.1.20.1`), and compile the Go code.
+2. Build the Go API container, download the prebuilt ONNX Runtime C library (`libonnxruntime.so.1.27.0`), and compile the Go code.
 3. Build the Next.js frontend container.
 4. Mount the models and training CSV datasets into the containers to seed the database and load ONNX sessions at startup.
 
@@ -94,7 +94,7 @@ docker run --name parkintel-postgres -e POSTGRES_DB=parkintel -e POSTGRES_USER=p
 ```
 
 ### 2. Run the Backend REST API
-Ensure you have Go installed (1.25+), and have setup your Python virtual environment (so Go can link to the python venv's `libonnxruntime.so` by default).
+Ensure you have Go installed (1.25+) and set `ONNX_RUNTIME_LIB_PATH` to an installed `libonnxruntime` shared library. Production containers bake this library into `/usr/lib`; local development can point at the Python venv copy if you have installed `ml-python/requirements.txt`.
 
 Navigate to `backend/` and run:
 ```bash

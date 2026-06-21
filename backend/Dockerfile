@@ -21,18 +21,32 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install dependencies (curl to download libonnxruntime, ca-certificates for secure requests)
+ARG ONNXRUNTIME_VERSION=1.27.0
+
+# Install runtime dependencies and curl to fetch the ONNX Runtime C library.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     ca-certificates \
+    curl \
+    libgomp1 \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and unpack official ONNX Runtime C library release
-RUN curl -sSL -o onnxruntime.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-x64-1.26.0.tgz \
-    && tar -xzf onnxruntime.tgz \
-    && mv onnxruntime-linux-x64-1.26.0/lib/libonnxruntime.so.1.26.0 /usr/lib/ \
-    && ln -s /usr/lib/libonnxruntime.so.1.26.0 /usr/lib/libonnxruntime.so \
-    && rm -rf onnxruntime.tgz onnxruntime-linux-x64-1.26.0
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) ort_arch="x64" ;; \
+        arm64) ort_arch="aarch64" ;; \
+        *) echo "Unsupported ONNX Runtime architecture: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    ort_dir="onnxruntime-linux-${ort_arch}-${ONNXRUNTIME_VERSION}"; \
+    curl -fsSL -o onnxruntime.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${ort_dir}.tgz"; \
+    tar -xzf onnxruntime.tgz; \
+    mv "${ort_dir}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}" "/usr/lib/"; \
+    ln -sf "/usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}" /usr/lib/libonnxruntime.so; \
+    rm -rf onnxruntime.tgz "${ort_dir}"
+
+ENV ONNX_RUNTIME_LIB_PATH=/usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}
+ENV LD_LIBRARY_PATH=/usr/lib
 
 # Copy the compiled binary from the build stage
 COPY --from=builder /app/parkintel-backend .

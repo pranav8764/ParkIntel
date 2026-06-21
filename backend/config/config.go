@@ -1,7 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 
 	"github.com/joho/godotenv"
 )
@@ -33,10 +36,9 @@ func LoadConfig() (*Config, error) {
 	if ginMode == "" {
 		ginMode = "release"
 	}
-	onnxLib := os.Getenv("ONNX_RUNTIME_LIB_PATH")
-	if onnxLib == "" {
-		// Default to the path of libonnxruntime.so found in the python virtual environment
-		onnxLib = "./ml-python/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.27.0"
+	onnxLib := resolveOnnxRuntimeLibPath(os.Getenv("ONNX_RUNTIME_LIB_PATH"))
+	if _, err := os.Stat(onnxLib); err != nil {
+		return nil, fmt.Errorf("ONNX runtime shared library not found at %q; set ONNX_RUNTIME_LIB_PATH to the absolute libonnxruntime.so path: %w", onnxLib, err)
 	}
 
 	return &Config{
@@ -46,4 +48,33 @@ func LoadConfig() (*Config, error) {
 		GinMode:            ginMode,
 		OnnxRuntimeLibPath: onnxLib,
 	}, nil
+}
+
+func resolveOnnxRuntimeLibPath(configured string) string {
+	if configured != "" {
+		return configured
+	}
+
+	for _, candidate := range []string{
+		"/usr/lib/libonnxruntime.so",
+		"/usr/local/lib/libonnxruntime.so",
+	} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	for _, pattern := range []string{
+		"../ml-python/.venv/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so.*",
+		"./ml-python/.venv/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so.*",
+	} {
+		matches, _ := filepath.Glob(pattern)
+		if len(matches) == 0 {
+			continue
+		}
+		sort.Strings(matches)
+		return matches[len(matches)-1]
+	}
+
+	return "/usr/lib/libonnxruntime.so"
 }
