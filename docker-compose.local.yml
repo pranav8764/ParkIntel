@@ -1,16 +1,33 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: parkintel-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: parkintel
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d parkintel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: parkintel-backend
-    # 2. Remove "depends_on: db: condition: service_healthy" since we connect to Supabase
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
-      # 3. Paste your Supabase URI here (with sslmode=require)
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: postgres://postgres:postgres@db:5432/parkintel?sslmode=disable
       ONNX_MODEL_DIR: /app/models/onnx
       ONNX_RUNTIME_LIB_PATH: /usr/lib/libonnxruntime.so
       PORT: 8080
@@ -31,4 +48,5 @@ services:
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
 
-# 4. Remove the "postgres_data" volume at the bottom if no longer needed
+volumes:
+  postgres_data:

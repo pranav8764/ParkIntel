@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -58,7 +59,28 @@ func main() {
 	if cfg.OnnxRuntimeLibPath == "" {
 		log.Fatal("ONNX_RUNTIME_LIB_PATH environment variable is not set")
 	}
-	sessions, err := inference.InitModelSessions(cfg.OnnxRuntimeLibPath, cfg.OnnxModelDir)
+
+	modelDir := cfg.OnnxModelDir
+	// Fallback logic to locate the model directory automatically if the specified one doesn't exist/contain metadata
+	metaFile := filepath.Join(modelDir, "onnx_meta.json")
+	if _, err := os.Stat(metaFile); os.IsNotExist(err) {
+		log.Printf("Specified model directory '%s' not found or missing onnx_meta.json. Checking fallbacks...\n", modelDir)
+		fallbacks := []string{
+			"models/onnx",
+			"../models/onnx",
+			"/app/models/onnx",
+			"./models/onnx",
+		}
+		for _, fb := range fallbacks {
+			if _, err := os.Stat(filepath.Join(fb, "onnx_meta.json")); err == nil {
+				log.Printf("Found model directory at fallback path: %s\n", fb)
+				modelDir = fb
+				break
+			}
+		}
+	}
+
+	sessions, err := inference.InitModelSessions(cfg.OnnxRuntimeLibPath, modelDir)
 	if err != nil {
 		log.Fatalf("Failed to initialize ONNX sessions: %v", err)
 	}
