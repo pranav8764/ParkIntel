@@ -55,7 +55,7 @@ export function TelemetryPanel() {
       : 0;
 
   // Last refresh time
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   useEffect(() => {
     if (!isValidating) {
       const timer = setTimeout(() => {
@@ -83,7 +83,7 @@ export function TelemetryPanel() {
             </Badge>
           )}
           <span className="mono-value text-[10px] text-muted">
-            {formatTimestamp(lastRefresh)}
+            {lastRefresh ? formatTimestamp(lastRefresh) : "--"}
           </span>
         </div>
       }

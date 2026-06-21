@@ -43,9 +43,15 @@ interface CommandState {
   resetSimulation: () => void;
 }
 
+const DEFAULT_SELECTED_HOUR = 18;
+
 /** Current hour of the day (0–23) for default filter. */
 function currentHour(): number {
   return new Date().getHours();
+}
+
+export function getCurrentHour(): number {
+  return currentHour();
 }
 
 export const useCommandStore = create<CommandState>((set) => ({
@@ -60,7 +66,7 @@ export const useCommandStore = create<CommandState>((set) => ({
     }),
 
   // --- Time Filters ---
-  selectedHour: currentHour(),
+  selectedHour: DEFAULT_SELECTED_HOUR,
   setSelectedHour: (hour) => set({ selectedHour: hour }),
 
   selectedDate: null,

@@ -5,7 +5,7 @@
 // Owns the background glow, top status bar, and panel grid.
 // ============================================================================
 
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import {
   Shield,
   Activity,
@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useHealth } from "@/hooks/use-health";
-import { useCommandStore } from "@/store/command-store";
+import { getCurrentHour, useCommandStore } from "@/store/command-store";
 import { formatHour } from "@/lib/format";
 import { OfflineOverlay } from "./offline-overlay";
 import { FilterControls } from "./filter-controls";
@@ -27,7 +27,12 @@ interface CommandShellProps {
 export function CommandShell({ children }: CommandShellProps) {
   const { isOnline, isOffline, isValidating, mutate } = useHealth();
   const selectedHour = useCommandStore((s) => s.selectedHour);
+  const setSelectedHour = useCommandStore((s) => s.setSelectedHour);
   const forecastMode = useCommandStore((s) => s.forecastMode);
+
+  useEffect(() => {
+    setSelectedHour(getCurrentHour());
+  }, [setSelectedHour]);
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden aurelian-glow">

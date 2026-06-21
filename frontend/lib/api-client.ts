@@ -16,8 +16,18 @@ import type {
   ApiError,
 } from "@/types/api";
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+function normalizeBaseUrl(rawUrl: string | undefined): string {
+  const url = (rawUrl || "http://localhost:8080").trim();
+  const withProtocol = /^https?:\/\//i.test(url)
+    ? url
+    : url.startsWith("//")
+      ? `https:${url}`
+      : `https://${url}`;
+
+  return withProtocol.replace(/\/+$/, "");
+}
+
+const BASE_URL = normalizeBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
 
 // ---------------------------------------------------------------------------
 // Internal helpers
